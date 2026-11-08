@@ -1,7 +1,7 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>CINEVAULT | Movies, Trailers and Authorized Downloads</title><meta name="description" content="Discover movies, watch trailers and download authorized titles on CINEVAULT.">
 <meta property="og:title" content="CINEVAULT"><meta property="og:description" content="Discover movies, watch trailers and download authorized titles."><meta property="og:type" content="website">
-<style>:root{--bg:#07091a;--bg2:#0e1330;--red:#e50914;--gold:#f5c542;--tx:#eef0f8;--mu:#9aa3c2}
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script><style>:root{--bg:#07091a;--bg2:#0e1330;--red:#e50914;--gold:#f5c542;--tx:#eef0f8;--mu:#9aa3c2}
 *{box-sizing:border-box;margin:0}
 body{font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--tx);min-height:100vh}
 a{color:inherit;text-decoration:none}img{max-width:100%;display:block}
@@ -46,10 +46,10 @@ table{width:100%;border-collapse:collapse}th,td{padding:10px;text-align:left;bor
 html{color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);scroll-padding-top:env(safe-area-inset-top,0px)}
 .top{top:env(safe-area-inset-top,0px)}body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);background:var(--bg);z-index:60}
 </style></head><body><header id="nav" class="top"></header><main id="app"></main><script>/* CONFIG: connect real services here. NEVER put service-role or TMDB keys in this file. */
-const CFG={SUPABASE_URL:'',SUPABASE_ANON_KEY:'',TMDB_PROXY_URL:'/api/tmdb/search'};
+const CFG={SUPABASE_URL:'https://qusideetkpnuahldmqdh.supabase.co',SUPABASE_ANON_KEY:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1c2lkZWV0a3BudWFobGRtcWRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQxNjM0ODgsImV4cCI6MjEwOTczOTQ4OH0.2MSXJUgVAC70M-5l2ORsd7W1qsLiHtDy5d2veSKQUlg',TMDB_PROXY_URL:'/api/tmdb/search'};
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const safe=u=>/^(https?:\/\/|assets\/|data:image\/jpeg;base64,)/.test(u||'')?u:'';
+const safe=u=>/^(https?:\/\/|assets\/|sb:\/\/movies\/|data:image\/jpeg;base64,)/.test(u||'')?u:'';
 const DB={get(k,d){try{return JSON.parse(localStorage.getItem('cv_'+k))??d}catch{return d}},set(k,v){localStorage.setItem('cv_'+k,JSON.stringify(v))}};
 const DEMO='https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_320x180.mp4'; // open-licensed demo file
 const SEED=[
@@ -67,22 +67,52 @@ const SEED=[
 ['Last Train to Busan Bay',2026,'Horror,Action','South Korea','Korean','Korean',7.5,'Yoon Tae-ho','Jung W.,Bae S.']];
 function seedMovies(){return SEED.map((s,i)=>({id:i+1,title:s[0],description:s[0]+' is a sample/demo title that shows how CINEVAULT presents a movie. Replace it from the admin panel.',year:s[1],genre:s[2].split(','),country:s[3],language:s[4],poster:'',backdrop:'',trailer:'https://www.youtube.com/embed/aqz-KE-bpKQ',director:s[7],cast:s[8].split(','),rating:s[6],runtime:'2h '+(5+i*3)+'m',category:s[5],featured:i%4==0,trending:i%3==0,recommended:i%2==0,published:true,downloadsCount:(i*37)%90+10,
 downloads:[['480p','350 MB'],['720p','900 MB'],['1080p','2.1 GB'],['4K','7.5 GB']].map((q,j)=>({quality:q[0],size:q[1],format:'MP4',server:'Server '+(j%2+1),url:DEMO,enabled:true}))}))}
-const getMovies=()=>{let m=DB.get('movies');if(!m){m=seedMovies();DB.set('movies',m)}return m};
-const saveMovies=m=>DB.set('movies',m);
+const getMovies=()=>{let m=DB.get('movies');if(!m&&!SB.on){m=seedMovies();DB.set('movies',m)}return m||[]};
+const saveMovies=m=>{DB.set('movies',m);SB.pushMovies(m)};
 const avg=m=>{const r=Object.values(DB.get('ratings',{})[m.id]||{});return r.length?{v:(r.reduce((a,b)=>a+b,0)/r.length).toFixed(1),n:r.length}:{v:Number(m.rating).toFixed(1),n:0}};
 
-/* DEMO auth (localStorage). For production swap these methods for Supabase auth: supabase.auth.signUp / signInWithPassword. Demo admin: admin@cinevault.test / Admin123! */
+
+/* ===== SUPABASE LAYER: active only when CFG.SUPABASE_URL and CFG.SUPABASE_ANON_KEY are filled in. Otherwise the site runs in browser-only demo mode. ===== */
+const SB={on:false,c:null,
+init(){if(CFG.SUPABASE_URL&&CFG.SUPABASE_ANON_KEY&&window.supabase){this.c=window.supabase.createClient(CFG.SUPABASE_URL,CFG.SUPABASE_ANON_KEY);this.on=true}},
+async boot(){const{data:{session}}=await this.c.auth.getSession();let u=null;
+ if(session){const{data}=await this.c.from('profiles').select('*').eq('id',session.user.id).maybeSingle();u={id:session.user.id,name:(data&&data.name)||'User',email:session.user.email,role:(data&&data.role)||'user'};DB.set('session',u)}else localStorage.removeItem('cv_session');
+ await this.load(u)},
+async load(u){try{const c=this.c,[mv,rt,ls,dl,rq,pf]=await Promise.all(['movies','ratings','lists','download_log','requests','profiles'].map(t=>c.from(t).select('*')));
+ DB.set('movies',(mv.data||[]).map(r=>({...r.data,id:r.id,published:r.published})));
+ const R={};(rt.data||[]).forEach(r=>{(R[r.movie_id]=R[r.movie_id]||{})[u&&r.user_id===u.id?u.email:r.user_id]=r.stars});DB.set('ratings',R);
+ for(const k of['wl','fav']){const o={};if(u)o[u.email]=(ls.data||[]).filter(r=>r.kind===k).map(r=>r.movie_id);DB.set(k,o)}
+ DB.set('dl',(dl.data||[]).map(r=>({email:r.email,id:r.movie_id,q:r.quality,date:r.created_at,status:r.status})));
+ DB.set('reqs',(rq.data||[]).map(r=>({id:r.id,email:r.email,title:r.title,year:r.year||'',message:r.message||'',status:r.status,date:r.created_at})));
+ DB.set('users',(pf.data||[]).map(r=>({name:r.name,email:r.email,role:r.role,joined:r.created_at})))}catch(e){toast('Could not load data: '+(e.message||e))}},
+async register(name,email,pw){const{data,error}=await this.c.auth.signUp({email,password:pw,options:{data:{name}}});if(error)return error.message;
+ if(!data.session)return'Account created. Confirm your email, then log in.';await this.boot();location.hash='home';return''},
+async login(email,pw){const{error}=await this.c.auth.signInWithPassword({email,password:pw});if(error)return'Wrong email or password.';await this.boot();return''},
+async pushMovies(ms){if(!this.on)return;try{const rows=ms.map(m=>{const{id,published,...d}=m;return{id,published:!!published,data:d}});let r=await this.c.from('movies').upsert(rows);if(r.error)throw r.error;
+ const keep=ms.map(m=>m.id),{data}=await this.c.from('movies').select('id'),gone=(data||[]).map(x=>x.id).filter(i=>!keep.includes(i));if(gone.length){r=await this.c.from('movies').delete().in('id',gone);if(r.error)throw r.error}}catch(e){toast('Save failed: '+(e.message||e))}},
+async bump(id){if(this.on)await this.c.rpc('bump_download',{mid:id})},
+async rate(id,n){const u=Auth.user();if(this.on&&u)await this.c.from('ratings').upsert({movie_id:id,user_id:u.id,stars:n},{onConflict:'movie_id,user_id'})},
+async list(kind,id,add){const u=Auth.user();if(!this.on||!u)return;add?await this.c.from('lists').insert({user_id:u.id,kind,movie_id:id}):await this.c.from('lists').delete().match({user_id:u.id,kind,movie_id:id})},
+async logDl(r){const u=Auth.user();if(this.on&&u)await this.c.from('download_log').insert({user_id:u.id,email:u.email,movie_id:r.id,quality:r.q,status:r.status})},
+async addReq(r){const u=Auth.user();if(!this.on||!u)return;await this.c.from('requests').insert({user_id:u.id,email:u.email,title:r.title,year:+r.year||null,message:r.message,status:'Pending'});await this.load(u);render()},
+async setReq(id,st){if(this.on)await this.c.from('requests').update({status:st}).eq('id',id)},
+async link(url){if(!url.startsWith('sb://'))return safe(url);const{data}=await this.c.storage.from('movies').createSignedUrl(url.slice(12),3600);return data&&data.signedUrl},
+async upload(file,onp){const{data:{session}}=await this.c.auth.getSession(),path=Date.now()+'-'+file.name.replace(/[^\w.-]/g,'_');
+ await new Promise((ok,no)=>{const x=new XMLHttpRequest();x.open('POST',CFG.SUPABASE_URL+'/storage/v1/object/movies/'+encodeURIComponent(path));x.setRequestHeader('Authorization','Bearer '+session.access_token);x.setRequestHeader('apikey',CFG.SUPABASE_ANON_KEY);x.setRequestHeader('Content-Type',file.type||'application/octet-stream');
+ x.upload.onprogress=e=>e.lengthComputable&&onp(Math.round(e.loaded/e.total*100));x.onload=()=>x.status<300?ok():no(new Error((JSON.parse(x.responseText||'{}').message)||'Upload failed ('+x.status+')'));x.onerror=()=>no(new Error('Network error'));x.send(file)});return path}};
+SB.init();
+/* Auth: Supabase when configured, else DEMO (localStorage). For production swap these methods for Supabase auth: supabase.auth.signUp / signInWithPassword. Demo admin: admin@cinevault.test / Admin123! */
 const Auth={users:()=>DB.get('users',[]),user:()=>DB.get('session',null),
 async hash(p){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('cv:'+p));return[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')},
-async init(){if(!this.users().some(u=>u.role==='admin'))DB.set('users',[...this.users(),{name:'Admin',email:'admin@cinevault.test',hash:await this.hash('Admin123!'),role:'admin',joined:Date.now()}])},
+async init(){if(SB.on){await SB.boot();return}if(!this.users().some(u=>u.role==='admin'))DB.set('users',[...this.users(),{name:'Admin',email:'admin@cinevault.test',hash:await this.hash('Admin123!'),role:'admin',joined:Date.now()}])},
 async register(name,email,pw){name=name.trim().slice(0,60);email=email.trim().toLowerCase();
  if(name.length<2||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)||pw.length<8)return'Enter a name, a valid email and a password of 8+ characters.';
- if(this.users().some(u=>u.email===email))return'That email is already registered.';
+ if(SB.on)return SB.register(name,email,pw);if(this.users().some(u=>u.email===email))return'That email is already registered.';
  DB.set('users',[...this.users(),{name,email,hash:await this.hash(pw),role:'user',joined:Date.now()}]);return this.login(email,pw)},
-async login(email,pw){email=email.trim().toLowerCase();const h=await this.hash(pw),f=this.users().find(x=>x.email===email&&x.hash===h);if(!f)return'Wrong email or password.';
+async login(email,pw){email=email.trim().toLowerCase();if(SB.on){const er=await SB.login(email,pw);if(er)return er;const n=sessionStorage.getItem('cvnext');sessionStorage.removeItem('cvnext');location.hash=/^#[\w-]+$/.test(n||'')?n.slice(1):'home';return''}const h=await this.hash(pw),f=this.users().find(x=>x.email===email&&x.hash===h);if(!f)return'Wrong email or password.';
  DB.set('session',{name:f.name,email:f.email,role:f.role});const n=sessionStorage.getItem('cvnext');sessionStorage.removeItem('cvnext');location.hash=/^#[\w-]+$/.test(n||'')?n.slice(1):'home';return''},
 need(){sessionStorage.setItem('cvnext',location.hash);location.hash='login'},
-logout(){localStorage.removeItem('cv_session');location.hash==='#home'?route():location.hash='home'},
+logout(){SB.on&&SB.c.auth.signOut();['session','wl','fav','dl','reqs','users'].forEach(k=>localStorage.removeItem('cv_'+k));location.hash==='#home'?route():location.hash='home'},
 guardAdmin(){const u=this.user();if(!u||u.role!=='admin'){location.hash='login';return false}return true}};
 function authPage(){const reg=page==='register';$('#app').innerHTML=`<div class="form glass"><h1>${reg?'Create account':'Log in'}</h1>
 <form id="af">${reg?'<label>Name</label><input name="n" required maxlength="60">':''}<label>Email</label><input name="e" type="email" required><label>Password</label><input name="p" type="password" required minlength="8"><p class="msg" id="am"></p><br><button class="btn big">${reg?'Register':'Log in'}</button></form>
@@ -104,73 +134,4 @@ function adminInit(){if(!Auth.guardAdmin())return;nav();const L=[['admin','Dashb
 const body=h=>$('#app').innerHTML=`<div class="adm"><aside class="side">${L.map(l=>`<a class="${page===l[0]?'on':''}" href="#${l[0]}">${l[1]}</a>`).join('')}</aside><div>${h}</div></div>`;
 ({admin:()=>dash(body),'admin-movies':()=>adminMovies(body),'admin-users':()=>users(body),'admin-requests':()=>reqs(body)})[page]()}
 function dash(body){const ms=getMovies();body(`<h1>Dashboard</h1><a class="btn big" href="#admin-movies" onclick="sessionStorage.cvnew=1">+ ADD NEW MOVIE</a><div class="stats">${[['Movies',ms.length],['Users',Auth.users().length],['Downloads',ms.reduce((a,m)=>a+(m.downloadsCount||0),0)],['Requests',DB.get('reqs',[]).length]].map(s=>`<div class="glass">${s[0]}<b>${s[1]}</b></div>`).join('')}</div>
-<h2>Most downloaded</h2><table>${[...ms].sort((a,b)=>b.downloadsCount-a.downloadsCount).slice(0,5).map(m=>`<tr><td>${esc(m.title)}</td><td>${m.downloadsCount}</td></tr>`).join('')}</table><h2>Recently added</h2><table>${[...ms].sort((a,b)=>b.id-a.id).slice(0,5).map(m=>`<tr><td>${esc(m.title)}</td><td>${m.year}</td></tr>`).join('')}</table>`)}
-const F=['title','year','genre','country','language','poster','backdrop','trailer','director','cast','rating','runtime'];
-function adminMovies(body){let q='';const list=()=>{const ms=getMovies().filter(m=>m.title.toLowerCase().includes(q));$('#ml').innerHTML=ms.map(m=>`<tr><td>${esc(m.title)}</td><td>${esc(m.category)}</td><td>${m.published?'Published':'Draft'}</td><td>${m.downloadsCount||0}</td><td class="btns"><button class="btn sm ghost" data-a="edit" data-id="${m.id}">Edit</button><button class="btn sm ghost" data-a="pub" data-id="${m.id}">${m.published?'Unpublish':'Publish'}</button><button class="btn sm ghost" data-a="feat" data-id="${m.id}">${m.featured?'Unfeature':'Feature'}</button><button class="btn sm ghost" data-a="trend" data-id="${m.id}">${m.trending?'Untrend':'Trend'}</button><button class="btn sm" data-a="del" data-id="${m.id}">Delete</button></td></tr>`).join('')};
-body(`<h1>Movies</h1><button class="btn big" id="add">+ ADD NEW MOVIE</button> <input id="mq" placeholder="Search movies" style="max-width:260px;display:inline-block"><div style="overflow-x:auto"><table><tr><th>Title</th><th>Category</th><th>Status</th><th>DLs</th><th></th></tr><tbody id="ml"></tbody></table></div><form id="mf" class="glass" hidden style="margin-top:20px"></form>`);list();
-$('#mq').oninput=e=>{q=e.target.value.toLowerCase();list()};
-const build=f=>{const g=k=>f.elements[k].value.trim(),c=k=>g(k).split(',').map(s=>s.trim()).filter(Boolean);return{id:+g('id'),title:g('title').slice(0,150),description:g('description').slice(0,2000),year:+g('year')||2026,genre:c('genre'),country:g('country'),language:g('language'),poster:safe(g('poster')),backdrop:safe(g('backdrop')),trailer:g('trailer'),director:g('director'),cast:c('cast'),rating:Math.min(10,+g('rating')||0),runtime:g('runtime'),category:g('category'),featured:f.elements.featured.checked,trending:f.elements.trending.checked,recommended:f.elements.recommended.checked,
-downloads:g('downloads').split('\n').map(l=>l.split('|').map(s=>s.trim())).filter(p=>p.length>=5&&safe(p[4])).map(p=>({quality:p[0],size:p[1],format:p[2],server:p[3],url:safe(p[4]),enabled:p[5]!=='off'}))}};
-const open=m=>{m=m||{id:0,genre:[],cast:[],category:'Hollywood',downloads:[]};const f=$('#mf');f.hidden=false;f.innerHTML=`<h2>${m.id?'Edit':'New'} movie</h2><label>Import metadata from TMDB (through your server-side proxy; the API key never lives in the browser)</label><div style="display:flex;gap:8px"><input id="tq" placeholder="Movie title"><button type="button" class="btn ghost" id="ts">Search</button></div><div id="tr"></div><div class="f2">${F.map(k=>`<div><label>${k}</label><input name="${k}" value="${esc(Array.isArray(m[k])?m[k].join(', '):m[k])}"></div>`).join('')}<div><label>Upload poster from device</label><input type="file" accept="image/*" data-up="poster"></div><div><label>Upload backdrop from device</label><input type="file" accept="image/*" data-up="backdrop"></div><div><label>category</label><select name="category">${['Hollywood','Nollywood','Bollywood','Korean','Other'].map(c=>`<option ${c===m.category?'selected':''}>${c}</option>`).join('')}</select></div><div class="full"><label>description</label><textarea name="description" rows="3">${esc(m.description)}</textarea></div>
-<div class="full"><label>Download options, one per line: quality|size|format|server|url|on or off (only files you have rights to distribute)</label><textarea name="downloads" rows="4">${esc((m.downloads||[]).map(d=>[d.quality,d.size,d.format,d.server,d.url,d.enabled?'on':'off'].join('|')).join('\n'))}</textarea></div>
-<div class="full">${['featured','trending','recommended'].map(k=>`<label style="display:inline-block;margin-right:14px"><input type="checkbox" name="${k}" style="width:auto" ${m[k]?'checked':''}> ${k}</label>`).join('')}</div></div><input type="hidden" name="id" value="${m.id}"><br>
-<button class="btn ghost" data-s="draft">Save Draft</button> <button type="button" class="btn ghost" id="pv">Preview</button> <button class="btn" data-s="pub">Publish</button>`;
-$('#ts').onclick=async()=>{try{const r=await(await fetch(CFG.TMDB_PROXY_URL+'?q='+encodeURIComponent($('#tq').value))).json();$('#tr').innerHTML=r.map((x,i)=>`<button type="button" class="btn sm ghost" data-t="${i}">${esc(x.title)} (${esc(x.year)})</button>`).join(' ');$('#tr').onclick=e=>{const x=r[e.target.dataset.t];if(!x)return;const s=(k,v)=>f.elements[k].value=Array.isArray(v)?v.join(', '):(v??'');
-s('title',x.title);s('year',x.year);s('genre',x.genres);s('cast',x.cast);s('director',x.director);s('runtime',x.runtime);s('rating',x.rating);s('language',x.language);s('country',x.country);s('poster',x.poster);s('backdrop',x.backdrop);s('description',x.overview)}}catch{$('#tr').innerHTML='<p class="msg">TMDB proxy not reachable. Set CFG.TMDB_PROXY_URL in js/movies.js and run your server-side proxy.</p>'}};
-$$('[data-up]',f).forEach(i=>i.onchange=()=>{const file=i.files[0];if(!file)return;const img=new Image(),fr=new FileReader();fr.onload=()=>{img.onload=()=>{const k=i.dataset.up==='poster'?400:960,s=Math.min(1,k/img.width),c=document.createElement('canvas');c.width=img.width*s;c.height=img.height*s;c.getContext('2d').drawImage(img,0,0,c.width,c.height);f.elements[i.dataset.up].value=c.toDataURL('image/jpeg',.8);toast('Image added')};img.src=fr.result};fr.readAsDataURL(file)});
-$('#pv').onclick=()=>{const m=build(f);const d=document.createElement('div');d.className='modal';d.onclick=()=>d.remove();d.innerHTML=`<div style="width:200px">${card({...m,id:0})}</div>`;document.body.append(d)}};
-$('#add').onclick=()=>open();if(sessionStorage.getItem('cvnew')){sessionStorage.removeItem('cvnew');open()}
-$('#mf').onsubmit=e=>{e.preventDefault();const f=e.target,m=build(f);if(!m.title)return toast('Title is required');const ms=getMovies(),old=ms.find(x=>x.id===m.id);m.published=e.submitter.dataset.s==='pub';
-if(old)Object.assign(old,m);else ms.push({...m,id:Math.max(0,...ms.map(x=>x.id))+1,downloadsCount:0});saveMovies(ms);f.hidden=true;list();toast(m.published?'Published':'Draft saved')};
-$('#ml').onclick=e=>{const b=e.target.closest('[data-a]');if(!b)return;const ms=getMovies(),m=ms.find(x=>x.id==b.dataset.id),a=b.dataset.a;
-if(a==='edit')return open(m);if(a==='del'){if(b.dataset.sure!=='1'){b.dataset.sure='1';b.textContent='Tap again to delete';setTimeout(()=>{b.dataset.sure='';b.textContent='Delete'},3000);return}saveMovies(ms.filter(x=>x!==m));toast('Deleted')}else{const k={pub:'published',feat:'featured',trend:'trending'}[a];m[k]=!m[k];saveMovies(ms)}list()}}
-function users(body){body(`<h1>Users</h1><table><tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th></tr>${Auth.users().map(u=>`<tr><td>${esc(u.name)}</td><td>${esc(u.email)}</td><td>${esc(u.role)}</td><td>${new Date(u.joined).toLocaleDateString()}</td></tr>`).join('')}</table>`)}
-function reqs(body){const r=DB.get('reqs',[]);body(`<h1>Requests</h1><table><tr><th>Movie</th><th>Year</th><th>From</th><th>Message</th><th>Status</th></tr>${r.map(x=>`<tr><td>${esc(x.title)}</td><td>${esc(x.year)}</td><td>${esc(x.email)}</td><td>${esc(x.message)}</td><td><select data-r="${x.id}">${STATUS.map(s=>`<option ${s===x.status?'selected':''}>${s}</option>`).join('')}</select></td></tr>`).join('')||'<tr><td colspan=5>No requests.</td></tr>'}</table>`);
-$('#app').onchange=e=>{const x=r.find(q=>q.id==e.target.dataset.r);if(x){x.status=e.target.value;DB.set('reqs',r);toast('Status updated')}}}
-
-let page='index',curId=0;
-const pub=()=>getMovies().filter(m=>m.published);
-const bestQ=m=>m.downloads.filter(d=>d.enabled).map(d=>d.quality).pop()||'HD';
-const embed=u=>{const m=(u||'').match(/(?:youtube\.com\/(?:embed\/|watch\?v=)|youtu\.be\/)([\w-]{11})/);return m?`https://www.youtube-nocookie.com/embed/${m[1]}?autoplay=1`:''};
-function toast(t){const d=document.createElement('div');d.className='toast';d.textContent=t;document.body.append(d);setTimeout(()=>d.remove(),2200)}
-function poster(m){return safe(m.poster)?`<img loading="lazy" src="${esc(safe(m.poster))}" alt="${esc(m.title)} poster">`:`<div class="ph" style="--h:${(m.id*47)%360}"><span>${esc(m.title)}</span></div>`}
-const card=m=>`<article class="card"><a href="#movie-${m.id}">${poster(m)}</a><div class="ci"><h3>${esc(m.title)}</h3><p>${m.year} · ${esc(m.genre.join(', '))}</p><p><b class="gold">★ ${avg(m).v}</b> <span class="q">${bestQ(m)}</span></p><div class="btns"><a class="btn sm" href="#movie-${m.id}">View Details</a>${embed(m.trailer)?`<button class="btn sm ghost" data-trailer="${m.id}">Trailer</button>`:''}</div></div></article>`;
-const rowOf=(t,l)=>l.length?`<h2 class="t">${esc(t)}</h2><div class="row">${l.map(card).join('')}</div>`:'';
-function nav(){const u=Auth.user(),L=[['index','Home'],['movies','Movies'],['genres','Genres'],['trending','Trending'],['downloads','Downloads'],['watchlist','Watchlist'],['requests','Requests']];
-$('#nav').innerHTML=`<a class="logo" href="#home">CINE<b>VAULT</b></a><button class="burger" aria-label="Menu">☰</button><div class="links">${L.map(l=>`<a href="#${l[0]==='index'?'home':l[0]}">${l[1]}</a>`).join('')}
-<form style="margin-left:auto"><input name="q" placeholder="Search" aria-label="Search" style="width:150px"></form>
-${u?`${u.role==='admin'?'<a href="#admin" class="gold">Admin panel</a>':`<span class="gold">${esc(u.name)}</span>`}<a href="#" id="lo">Log out</a>`:'<a href="#login" class="btn sm">Login</a>'}</div>`;
-$('.burger').onclick=()=>$('.links').classList.toggle('open');$('.links form').onsubmit=e=>{e.preventDefault();sessionStorage.setItem('cvq',e.target.q.value);location.hash==='#movies'?route():location.hash='movies'};if($('#lo'))$('#lo').onclick=e=>{e.preventDefault();Auth.logout()}}
-function toggle(k,id){const u=Auth.user();if(!u){Auth.need();return}const a=DB.get(k,{}),l=a[u.email]||[],i=l.indexOf(id);i<0?l.push(id):l.splice(i,1);a[u.email]=l;DB.set(k,a);toast(i<0?'Added':'Removed');return i<0}
-function trailer(id){const m=getMovies().find(x=>x.id==id),e=embed(m&&m.trailer);if(!e)return toast('No trailer available');const d=document.createElement('div');d.className='modal';d.innerHTML=`<div class="box"><button class="btn sm ghost x">Close ✕</button><iframe src="${e}" allow="autoplay;encrypted-media" allowfullscreen title="${esc(m.title)} trailer"></iframe></div>`;d.onclick=ev=>{if(ev.target===d||ev.target.classList.contains('x'))d.remove()};document.body.append(d)}
-function download(id,i){const u=Auth.user();if(!u){Auth.need();return}const ms=getMovies(),m=ms.find(x=>x.id==id),d=m.downloads[i];if(!d||!d.enabled||!safe(d.url).startsWith('http'))return toast('Unavailable');
-m.downloadsCount=(m.downloadsCount||0)+1;saveMovies(ms);const h=DB.get('dl',[]),rec={email:u.email,id:m.id,q:d.quality,date:new Date().toISOString(),status:'Started'};h.push(rec);DB.set('dl',h);
-const b=$('#prog');b.innerHTML='<div class="bar"><i></i></div>';setTimeout(()=>$('i',b).style.width='100%',30);
-setTimeout(()=>{rec.status='Completed';DB.set('dl',h);window.open(safe(d.url),'_blank','noopener');b.innerHTML='';toast('Download started')},1700)}
-document.addEventListener('click',e=>{const t=e.target.closest('[data-trailer],[data-wl],[data-fav],[data-dl],[data-rate]');if(!t)return;
-if(t.dataset.trailer)trailer(t.dataset.trailer);if(t.dataset.wl){toggle('wl',+t.dataset.wl);render()}if(t.dataset.fav){toggle('fav',+t.dataset.fav);render()}
-if(t.dataset.dl)download(t.dataset.dl,+t.dataset.i);if(t.dataset.rate){const u=Auth.user();if(!u)return Auth.need();const r=DB.get('ratings',{}),id=t.dataset.id;(r[id]=r[id]||{})[u.email]=+t.dataset.rate;DB.set('ratings',r);toast('Rating saved');render()}});
-function home(){const ms=pub(),f=ms.find(m=>m.featured)||ms[0];if(!f)return $('#app').innerHTML='<p class="wrap">No movies published yet.</p>';const by=c=>ms.filter(m=>m.category===c);
-$('#app').innerHTML=`<section class="hero"><div><span class="q">Featured</span><h1>${esc(f.title)}</h1><p>${esc(f.description)}</p><a class="btn big" href="#movie-${f.id}">Details &amp; Download</a> <button class="btn big ghost" data-trailer="${f.id}">▶ Watch Trailer</button></div></section>`+
-rowOf('Featured Movies',ms.filter(m=>m.featured))+rowOf('Trending Now',ms.filter(m=>m.trending))+rowOf('Recently Added',[...ms].sort((a,b)=>b.id-a.id).slice(0,10))+rowOf('Latest Hollywood Movies',by('Hollywood'))+rowOf('Latest Nollywood Movies',by('Nollywood'))+rowOf('Bollywood Movies',by('Bollywood'))+rowOf('Korean Movies',by('Korean'))+rowOf('Most Downloaded',[...ms].sort((a,b)=>b.downloadsCount-a.downloadsCount).slice(0,10))+rowOf('Top Rated',[...ms].sort((a,b)=>avg(b).v-avg(a).v).slice(0,10))+rowOf('Recommended For You',ms.filter(m=>m.recommended))}
-function detail(){const id=curId,m=pub().find(x=>x.id===id);if(!m)return $('#app').innerHTML='<p class="wrap">Movie not found. <a href="#movies" class="gold">Browse movies</a></p>';
-document.title=m.title+' | CINEVAULT';const u=Auth.user(),wl=u&&(DB.get('wl',{})[u.email]||[]).includes(id),fv=u&&(DB.get('fav',{})[u.email]||[]).includes(id),mine=u&&((DB.get('ratings',{})[id]||{})[u.email])||0,a=avg(m);
-$('#app').innerHTML=`<section class="detail">${poster(m)}<div class="info"><h1>${esc(m.title)}</h1><p><b class="gold">★ ${a.v}</b> (${a.n} user ratings) · ${m.year} · ${esc(m.runtime)} · ${esc(m.country)} · ${esc(m.language)}</p><p>${esc(m.genre.join(' / '))}</p><p>${esc(m.description)}</p><p>Director: ${esc(m.director)}<br>Cast: ${esc(m.cast.join(', '))}</p>
-<button class="btn big" data-trailer="${id}">▶ Watch Trailer</button> <button class="btn ghost" data-wl="${id}">${wl?'✓ In Watchlist':'+ Watchlist'}</button> <button class="btn ghost" data-fav="${id}">${fv?'♥ Favorited':'♡ Favorite'}</button>
-<div class="stars" aria-label="Rate this movie">${[1,2,3,4,5].map(n=>`<button class="${n<=mine?'on':''}" data-rate="${n}" data-id="${id}">★</button>`).join('')}</div></div></section>
-<div class="wrap"><div class="glass"><h2>Download Movie</h2><div style="overflow-x:auto"><table><tr><th>Quality</th><th>Size</th><th>Format</th><th>Server</th><th>Action</th></tr>${m.downloads.map((d,i)=>`<tr><td>${esc(d.quality)}</td><td>${esc(d.size)}</td><td>${esc(d.format)}</td><td>${esc(d.server)}</td><td>${d.enabled?`<button class="btn sm" data-dl="${id}" data-i="${i}">Download</button>`:'Unavailable'}</td></tr>`).join('')}</table></div><div id="prog"></div></div></div>`+
-rowOf('Related Movies',pub().filter(x=>x.id!==id&&(x.category===m.category||x.genre.some(g=>m.genre.includes(g)))).slice(0,10))}
-function saved(k,title){const u=Auth.user();if(!u)return $('#app').innerHTML='<p class="wrap"><a class="btn" href="#login">Log in</a> to see your saved movies.</p>';const ids=(DB.get(k,{})[u.email]||[]);
-$('#app').innerHTML=`<h2 class="t">${title}</h2>`+(ids.length?`<div class="grid">${pub().filter(m=>ids.includes(m.id)).map(card).join('')}</div>`:'<p class="wrap">Nothing saved yet. Open a movie and tap + Watchlist.</p>')}
-function downloadsPage(){const u=Auth.user();if(!u)return $('#app').innerHTML='<p class="wrap"><a class="btn" href="#login">Log in</a> to see your download history.</p>';const ms=getMovies();
-$('#app').innerHTML=`<h2 class="t">Download History</h2><div class="wrap"><table><tr><th>Movie</th><th>Quality</th><th>Date</th><th>Status</th></tr>${DB.get('dl',[]).filter(d=>d.email===u.email).reverse().map(d=>{const m=ms.find(x=>x.id===d.id)||{title:'Removed',id:0};return`<tr><td><a href="#movie-${m.id}">${esc(m.title)}</a></td><td>${esc(d.q)}</td><td>${new Date(d.date).toLocaleString()}</td><td>${esc(d.status)}</td></tr>`}).join('')||'<tr><td colspan=4>No downloads yet.</td></tr>'}</table></div>`}
-function requestsPage(){const u=Auth.user();if(!u)return $('#app').innerHTML='<p class="wrap"><a class="btn" href="#login">Log in</a> to request a movie.</p>';const mine=DB.get('reqs',[]).filter(r=>r.email===u.email);
-$('#app').innerHTML=`<div class="wrap"><form id="rf" class="glass" style="max-width:480px"><h2>Request a movie</h2><label>Title</label><input name="t" required maxlength="120"><label>Release year</label><input name="y" type="number" min="1900" max="2100"><label>Message (optional)</label><textarea name="m" maxlength="400"></textarea><br><button class="btn">Send request</button></form>
-<h2 class="t" style="padding-left:0">Your requests</h2><table><tr><th>Movie</th><th>Year</th><th>Status</th></tr>${mine.map(r=>`<tr><td>${esc(r.title)}</td><td>${esc(r.year)}</td><td>${esc(r.status)}</td></tr>`).join('')||'<tr><td colspan=3>None yet.</td></tr>'}</table></div>`;
-$('#rf').onsubmit=e=>{e.preventDefault();const f=e.target,a=DB.get('reqs',[]);a.push({id:Date.now(),email:u.email,title:f.t.value.trim().slice(0,120),year:f.y.value,message:f.m.value.trim().slice(0,400),status:'Pending',date:Date.now()});DB.set('reqs',a);toast('Request sent');render()}}
-function genresPage(){const ms=pub(),gs=[...new Set(ms.flatMap(m=>m.genre))].sort();$('#app').innerHTML=`<h2 class="t">Browse by genre</h2>`+(gs.map(g=>rowOf(g,ms.filter(m=>m.genre.includes(g)))).join('')||'<p class="wrap">No movies yet.</p>')}
-function trendingPage(){const ms=pub().filter(m=>m.trending).sort((a,b)=>b.downloadsCount-a.downloadsCount);$('#app').innerHTML=`<h2 class="t">Trending now</h2>`+(ms.length?`<div class="grid">${ms.map(card).join('')}</div>`:'<p class="wrap">Nothing is trending yet. Mark movies as trending in the admin panel.</p>')}
-function render(){({index:home,genres:genresPage,trending:trendingPage,movies:searchPage,movie:detail,watchlist:()=>saved('wl','Your Watchlist'),downloads:downloadsPage,requests:requestsPage,login:authPage,register:authPage}[page]||(()=>{}))()}
-function route(){const h=location.hash.slice(1)||'home',mm=h.match(/^movie-(\d+)$/);curId=mm?+mm[1]:0;page=mm?'movie':h==='home'?'index':h;$('#app').onchange=null;$$('.modal').forEach(x=>x.remove());window.scrollTo(0,0);if(page.startsWith('admin')){adminInit();return}nav();render()}
-window.addEventListener('hashchange',route);Auth.init().then(route);
-</script></body></html>
+<h2>Most downloaded</h2><table>${[...ms].sort((a,b)=>b.downloadsCount-a.downloadsCount).slice(0,5).map(m=>`<tr><td>${esc(m.title)}</td><td>${m.downloadsCount}</td></tr>`).join('')}</table><h2>Recently added</h
